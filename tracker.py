@@ -125,22 +125,48 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
             flights = await page.evaluate("""
                 () => {
                     const results = [];
-                    const cards = document.querySelectorAll('li.pIav2d, div[data-ved] li');
-                    cards.forEach(card => {
-                        const priceEl = card.querySelector('[data-gs], .YMlIz, .FpEdX span');
-                        const priceText = priceEl ? priceEl.innerText : card.innerText;
-                        const priceMatch = priceText.match(/฿\\s?([\\d,]+)/);
+
+                    // Strategy 1: look for list items that contain a THB price
+                    const candidates = Array.from(document.querySelectorAll('li, [role="listitem"]'));
+                    candidates.forEach(card => {
+                        const text = card.innerText || '';
+                        const priceMatch = text.match(/฿\\s?([\\d,]+)/);
                         if (!priceMatch) return;
                         const price = parseInt(priceMatch[1].replace(/,/g, ''));
-                        const airlineEl = card.querySelector('.sSHqwe, .Xsgmwe, .h1fkLb');
-                        const airline = airlineEl ? airlineEl.innerText.trim() : 'Unknown';
-                        const durEl = card.querySelector('.gvkrdb, .AdWm1c.gvkrdb');
-                        const duration = durEl ? durEl.innerText.trim() : '';
-                        const stopEl = card.querySelector('.EfT7Ae span, .ogfYpf');
-                        const stops = stopEl ? stopEl.innerText.trim() : '';
-                        if (price > 0) results.push({ airline, price, duration, stops });
+                        if (price < 1000 || price > 500000) return;
+
+                        const durMatch = text.match(/(\\d{1,2}\\s?hr?\\s?\\d{0,2}\\s?min?|\\d{1,2}h\\s?\\d{0,2}m)/i);
+                        const duration = durMatch ? durMatch[0].trim() : '';
+
+                        const stopMatch = text.match(/(nonstop|\\d+\\s+stop)/i);
+                        const stops = stopMatch ? stopMatch[0].trim() : '';
+
+                        const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
+                        const airline = lines[0] || 'Unknown';
+
+                        results.push({ airline, price, duration, stops });
                     });
-                    return results;
+
+                    // Strategy 2: fallback — scan all text if strategy 1 found nothing
+                    if (results.length === 0) {
+                        const allText = document.body.innerText;
+                        const matches = [...allText.matchAll(/฿\\s?([\\d,]+)/g)];
+                        matches.forEach(m => {
+                            const price = parseInt(m[1].replace(/,/g, ''));
+                            if (price >= 1000 && price <= 500000) {
+                                results.push({ airline: 'Unknown', price, duration: '', stops: '' });
+                            }
+                        });
+                    }
+
+                    // Deduplicate by airline + price
+                    const seen = new Set();
+                    return results.filter(r => {
+                        const key = r.airline + r.price;
+                        if (seen.has(key)) return false;
+                        seen.add(key);
+                        return true;
+                    });
                 }
             """)
             results = flights if flights else []
