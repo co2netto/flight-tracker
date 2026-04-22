@@ -149,7 +149,7 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
             print(f"  Loading Google Flights...")
             await page.goto(
                 "https://www.google.com/travel/flights?hl=en&curr=THB",
-                wait_until="networkidle", timeout=60000
+                wait_until="domcontentloaded", timeout=60000
             )
             await asyncio.sleep(2)
 
@@ -165,49 +165,61 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
                 except Exception:
                     pass
 
-            # ── Step 2: Fill "Where from?" ────────────────────────────────
+            # ── Step 2: Wait for page to be interactive ───────────────
+            await asyncio.sleep(4)
+
+            # Take early screenshot to see what loaded
+            screenshot_path = f"{debug_prefix}.png"
+            await page.screenshot(path=screenshot_path, full_page=False)
+            title = await page.title()
+            page_text = await page.inner_text("body")
+            print(f"  Page title after load: {title}")
+            print(f"  Page text preview: {page_text[:300]}")
+
+            # ── Step 3: Fill "Where from?" ────────────────────────────────
             print(f"  Entering origin: {origin}")
             from_field = page.locator('input[placeholder="Where from?"]').first
+            await from_field.wait_for(state="visible", timeout=20000)
             await from_field.click()
-            await from_field.click(click_count=3)
+            await asyncio.sleep(0.5)
             await from_field.type(origin, delay=100)
             await asyncio.sleep(1.5)
             await page.keyboard.press("ArrowDown")
             await page.keyboard.press("Enter")
             await asyncio.sleep(1)
 
-            # ── Step 3: Fill "Where to?" ──────────────────────────────────
+            # ── Step 4: Fill "Where to?" ──────────────────────────────────
             print(f"  Entering destination: {destination}")
             to_field = page.locator('input[placeholder="Where to?"]').first
+            await to_field.wait_for(state="visible", timeout=20000)
             await to_field.click()
-            await to_field.click(click_count=3)
+            await asyncio.sleep(0.5)
             await to_field.type(destination, delay=100)
             await asyncio.sleep(1.5)
             await page.keyboard.press("ArrowDown")
             await page.keyboard.press("Enter")
             await asyncio.sleep(1)
 
-            # ── Step 4: Fill departure date ───────────────────────────────
+            # ── Step 5: Fill departure date ───────────────────────────────
             print(f"  Entering date: {date}")
             depart_field = page.locator('input[placeholder="Departure"]').first
+            await depart_field.wait_for(state="visible", timeout=20000)
             await depart_field.click()
-            await asyncio.sleep(1)
-            await depart_field.click(click_count=3)
+            await asyncio.sleep(0.5)
             await depart_field.type(date, delay=80)
             await page.keyboard.press("Enter")
             await asyncio.sleep(1)
 
-            # ── Step 5: Search ────────────────────────────────────────────
+            # ── Step 6: Search ────────────────────────────────────────────
             print(f"  Clicking Search...")
             search_btn = page.locator('button:has-text("Search")').first
+            await search_btn.wait_for(state="visible", timeout=10000)
             await search_btn.click()
-            await asyncio.sleep(7)  # Wait for results to load
+            await asyncio.sleep(7)
 
-            # ── Step 6: Screenshot ────────────────────────────────────────
-            screenshot_path = f"{debug_prefix}.png"
+            # ── Step 7: Take final screenshot of results page ─────────────
             await page.screenshot(path=screenshot_path, full_page=False)
             print(f"  Screenshot saved: {screenshot_path}")
-
             title     = await page.title()
             page_text = await page.inner_text("body")
             print(f"  Page title: {title}")
