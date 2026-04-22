@@ -1,0 +1,42 @@
+name: Flight Price Tracker
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'  # Every 4 hours (00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC)
+  workflow_dispatch:         # Run manually from the Actions tab anytime
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write        # Needed to commit prices.csv back to the repo
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install playwright
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Run tracker
+        run: python tracker.py
+        env:
+          TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Save price history to repo
+        run: |
+          git config user.name  "flight-tracker-bot"
+          git config user.email "bot@github-actions"
+          git add prices.csv
+          git diff --cached --quiet || git commit -m "price update $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push
