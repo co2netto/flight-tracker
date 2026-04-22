@@ -34,9 +34,10 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
       - name: Save price history to repo
+        if: always()   # Run this step even if tracker.py had errors
         run: |
           git config user.name  "flight-tracker-bot"
           git config user.email "bot@github-actions"
-          git add prices.csv
+          git add --ignore-errors prices.csv debug_*.png || true
           git diff --cached --quiet || git commit -m "price update $(date -u '+%Y-%m-%d %H:%M UTC')"
-          git push
+          git push || true
