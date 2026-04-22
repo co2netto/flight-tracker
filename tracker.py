@@ -68,7 +68,8 @@ def send_telegram_photo(photo_path: str, caption: str = ""):
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
     )
     try:
-        urllib.request.urlopen(req, timeout=20)
+        resp = urllib.request.urlopen(req, timeout=20)
+        print(f"  Telegram photo response: {resp.status}")
     except Exception as e:
         print(f"  Could not send screenshot to Telegram: {e}")
 
@@ -264,6 +265,9 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
             print(f"  Found {len(results)} result(s)")
 
             if not results:
+                print(f"  Sending screenshot to Telegram: {screenshot_path}")
+                import os as _os
+                print(f"  Screenshot file exists: {_os.path.exists(screenshot_path)}, size: {_os.path.getsize(screenshot_path) if _os.path.exists(screenshot_path) else 0} bytes")
                 send_telegram_photo(
                     screenshot_path,
                     f"⚠️ {origin}→{destination} {date}: 0 prices found.\nTitle: {title}"
