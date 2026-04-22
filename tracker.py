@@ -2,6 +2,7 @@
 BKK <-> ZQN Flight Price Tracker
 - Alerts on every check regardless of price
 - Logs price history to prices.csv in the repo
+- Saves debug screenshot + HTML on failure
 """
 
 import os
@@ -45,16 +46,45 @@ def send_telegram(message: str):
                                  headers={"Content-Type": "application/json"})
     urllib.request.urlopen(req, timeout=10)
 
+def send_telegram_photo(photo_path: str, caption: str = ""):
+    """Send a photo file to Telegram."""
+    import mimetypes
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    with open(photo_path, "rb") as f:
+        photo_data = f.read()
+    boundary = "----FormBoundary"
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
+        f"{TELEGRAM_CHAT_ID}\r\n"
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="caption"\r\n\r\n'
+        f"{caption}\r\n"
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="photo"; filename="debug.png"\r\n'
+        f"Content-Type: image/png\r\n\r\n"
+    ).encode() + photo_data + f"\r\n--{boundary}--\r\n".encode()
+    req = urllib.request.Request(
+        url, data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    )
+    try:
+        urllib.request.urlopen(req, timeout=20)
+    except Exception as e:
+        print(f"  Failed to send screenshot to Telegram: {e}")
+
 # ── CSV logger ─────────────────────────────────────────────────────────────────
 
-def load_last_price(origin: str, destination: str) -> int | None:
-    """Read the last recorded cheapest price for a route from CSV."""
+def load_last_price(origin: str, destination: str, date: str) -> int | None:
+    """Read the last recorded cheapest price for a specific route+date."""
     if not os.path.exists(CSV_FILE):
         return None
     with open(CSV_FILE, newline="") as f:
         rows = list(csv.DictReader(f))
     route_rows = [r for r in rows
-                  if r["origin"] == origin and r["destination"] == destination]
+                  if r["origin"] == origin
+                  and r["destination"] == destination
+                  and r["travel_date"] == date]
     if not route_rows:
         return None
     try:
@@ -89,12 +119,14 @@ def append_to_csv(origin: str, destination: str, date: str,
 # ── Scraper ────────────────────────────────────────────────────────────────────
 
 async def scrape_google_flights(origin: str, destination: str, date: str) -> list[dict]:
+    # Build a direct Google Flights URL with date encoded
     url = (
         f"https://www.google.com/travel/flights/search"
-        f"?q=Flights+from+{origin}+to+{destination}"
+        f"?q=Flights+from+{origin}+to+{destination}+on+{date}"
         f"&curr=THB&hl=en"
     )
-    results = []
+    results      = []
+    debug_prefix = f"debug_{origin}_{destination}_{date}"
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -104,6 +136,7 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
+                "--window-size=1280,900",
             ]
         )
         context = await browser.new_context(
@@ -114,20 +147,51 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
             ),
             viewport={"width": 1280, "height": 900},
             locale="en-US",
+            timezone_id="Asia/Bangkok",
         )
+
+        # Hide webdriver flag to reduce bot detection
+        await context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        )
+
         page = await context.new_page()
 
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            await page.wait_for_selector('[data-ved]', timeout=30000)
-            await asyncio.sleep(3)
+            print(f"  Loading: {url}")
+            await page.goto(url, wait_until="networkidle", timeout=60000)
+            await asyncio.sleep(5)
 
+            # Save screenshot regardless — uploaded to repo as debug artifact
+            screenshot_path = f"{debug_prefix}.png"
+            await page.screenshot(path=screenshot_path, full_page=False)
+            print(f"  Screenshot saved: {screenshot_path}")
+
+            # Save raw page text snippet for logs
+            page_text = await page.inner_text("body")
+            print(f"  Page text (first 800 chars):\n{page_text[:800]}")
+
+            # Check for common blocking pages
+            title = await page.title()
+            print(f"  Page title: {title}")
+
+            if any(word in page_text.lower() for word in ["captcha", "unusual traffic", "verify"]):
+                print("  ⚠ Bot detection / CAPTCHA page detected")
+                send_telegram_photo(
+                    screenshot_path,
+                    f"⚠️ {origin}→{destination} {date}: Bot detection page. See screenshot."
+                )
+                return []
+
+            # ── Extract prices (two strategies) ───────────────────────────
             flights = await page.evaluate("""
                 () => {
                     const results = [];
 
-                    // Strategy 1: look for list items that contain a THB price
-                    const candidates = Array.from(document.querySelectorAll('li, [role="listitem"]'));
+                    // Strategy 1: list items containing a THB price
+                    const candidates = Array.from(
+                        document.querySelectorAll('li, [role="listitem"], [role="row"]')
+                    );
                     candidates.forEach(card => {
                         const text = card.innerText || '';
                         const priceMatch = text.match(/฿\\s?([\\d,]+)/);
@@ -147,7 +211,7 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
                         results.push({ airline, price, duration, stops });
                     });
 
-                    // Strategy 2: fallback — scan all text if strategy 1 found nothing
+                    // Strategy 2: full page text scan fallback
                     if (results.length === 0) {
                         const allText = document.body.innerText;
                         const matches = [...allText.matchAll(/฿\\s?([\\d,]+)/g)];
@@ -159,7 +223,7 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
                         });
                     }
 
-                    // Deduplicate by airline + price
+                    // Deduplicate
                     const seen = new Set();
                     return results.filter(r => {
                         const key = r.airline + r.price;
@@ -169,12 +233,22 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
                     });
                 }
             """)
+
             results = flights if flights else []
+            print(f"  Found {len(results)} result(s)")
+
+            # If still no results, send the screenshot to Telegram for manual inspection
+            if not results:
+                send_telegram_photo(
+                    screenshot_path,
+                    f"⚠️ {origin}→{destination} {date}: No prices found. "
+                    f"Page title: '{title}'. Check screenshot."
+                )
 
         except PlaywrightTimeout:
-            print(f"Timeout scraping {origin} → {destination}")
+            print(f"  Timeout loading page")
         except Exception as e:
-            print(f"Error scraping {origin} → {destination}: {e}")
+            print(f"  Error: {e}")
         finally:
             await browser.close()
 
@@ -198,33 +272,28 @@ def price_change_label(current: int, previous: int | None) -> str:
 async def main():
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-    for route in ROUTES:
+    # Only check the first route in debug mode so we don't spam
+    # Remove the [:1] slice once scraping is confirmed working
+    for route in ROUTES[:1]:
         origin      = route["origin"]
         destination = route["destination"]
         date        = route["date"]
 
-        print(f"Checking {origin} → {destination} on {date}...")
+        print(f"\nChecking {origin} → {destination} on {date}...")
         flights = await scrape_google_flights(origin, destination, date)
 
         if not flights:
-            print(f"  No results found (site may have changed layout)")
-            send_telegram(
-                f"⚠️ <b>{origin} → {destination}</b>\n"
-                f"No results found at {now}.\n"
-                f"Google Flights may have updated its layout."
-            )
+            print(f"  No results — screenshot sent to Telegram for inspection")
             continue
 
         flights.sort(key=lambda x: x["price"])
         cheapest   = flights[0]
-        last_price = load_last_price(origin, destination)
+        last_price = load_last_price(origin, destination, date)
         change     = price_change_label(cheapest["price"], last_price)
 
-        # Save to CSV
         append_to_csv(origin, destination, date, cheapest, flights)
         print(f"  Cheapest: ฿{cheapest['price']:,} — {cheapest['airline']} | {change}")
 
-        # Top 5 results
         lines = []
         for i, f in enumerate(flights[:5], 1):
             stop_info = f"· {f['stops']}" if f.get("stops") else ""
