@@ -1,8 +1,9 @@
 """
 BKK <-> ZQN Flight Price Tracker
+- Fills the Google Flights search form like a real user
 - Alerts on every check regardless of price
 - Logs price history to prices.csv in the repo
-- Saves debug screenshot + HTML on failure
+- Sends debug screenshot to Telegram on failure
 """
 
 import os
@@ -47,12 +48,10 @@ def send_telegram(message: str):
     urllib.request.urlopen(req, timeout=10)
 
 def send_telegram_photo(photo_path: str, caption: str = ""):
-    """Send a photo file to Telegram."""
-    import mimetypes
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     with open(photo_path, "rb") as f:
         photo_data = f.read()
-    boundary = "----FormBoundary"
+    boundary = "FormBoundaryABC123"
     body = (
         f"--{boundary}\r\n"
         f'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
@@ -71,12 +70,11 @@ def send_telegram_photo(photo_path: str, caption: str = ""):
     try:
         urllib.request.urlopen(req, timeout=20)
     except Exception as e:
-        print(f"  Failed to send screenshot to Telegram: {e}")
+        print(f"  Could not send screenshot to Telegram: {e}")
 
 # ── CSV logger ─────────────────────────────────────────────────────────────────
 
 def load_last_price(origin: str, destination: str, date: str) -> int | None:
-    """Read the last recorded cheapest price for a specific route+date."""
     if not os.path.exists(CSV_FILE):
         return None
     with open(CSV_FILE, newline="") as f:
@@ -92,9 +90,7 @@ def load_last_price(origin: str, destination: str, date: str) -> int | None:
     except (ValueError, KeyError):
         return None
 
-def append_to_csv(origin: str, destination: str, date: str,
-                  cheapest: dict, all_flights: list):
-    """Append one row per check to prices.csv."""
+def append_to_csv(origin, destination, date, cheapest, all_flights):
     file_exists = os.path.exists(CSV_FILE)
     with open(CSV_FILE, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=[
@@ -119,12 +115,6 @@ def append_to_csv(origin: str, destination: str, date: str,
 # ── Scraper ────────────────────────────────────────────────────────────────────
 
 async def scrape_google_flights(origin: str, destination: str, date: str) -> list[dict]:
-    # Build a direct Google Flights URL with date encoded
-    url = (
-        f"https://www.google.com/travel/flights/search"
-        f"?q=Flights+from+{origin}+to+{destination}+on+{date}"
-        f"&curr=THB&hl=en"
-    )
     results      = []
     debug_prefix = f"debug_{origin}_{destination}_{date}"
 
@@ -136,7 +126,6 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
-                "--window-size=1280,900",
             ]
         )
         context = await browser.new_context(
@@ -149,46 +138,86 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
             locale="en-US",
             timezone_id="Asia/Bangkok",
         )
-
-        # Hide webdriver flag to reduce bot detection
         await context.add_init_script(
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
-
         page = await context.new_page()
 
         try:
-            print(f"  Loading: {url}")
-            await page.goto(url, wait_until="networkidle", timeout=60000)
-            await asyncio.sleep(5)
+            # ── Step 1: Load homepage ──────────────────────────────────────
+            print(f"  Loading Google Flights...")
+            await page.goto(
+                "https://www.google.com/travel/flights?hl=en&curr=THB",
+                wait_until="networkidle", timeout=60000
+            )
+            await asyncio.sleep(2)
 
-            # Save screenshot regardless — uploaded to repo as debug artifact
+            # Dismiss any cookie / consent dialog if present
+            for selector in ['button:has-text("Accept all")', 'button:has-text("Reject all")',
+                              'button:has-text("Accept")', '[aria-label="Accept all"]']:
+                try:
+                    btn = page.locator(selector).first
+                    if await btn.is_visible(timeout=2000):
+                        await btn.click()
+                        await asyncio.sleep(1)
+                        break
+                except Exception:
+                    pass
+
+            # ── Step 2: Fill "Where from?" ────────────────────────────────
+            print(f"  Entering origin: {origin}")
+            from_field = page.locator('input[placeholder="Where from?"]').first
+            await from_field.click()
+            await from_field.triple_click()
+            await from_field.type(origin, delay=100)
+            await asyncio.sleep(1.5)
+            await page.keyboard.press("ArrowDown")
+            await page.keyboard.press("Enter")
+            await asyncio.sleep(1)
+
+            # ── Step 3: Fill "Where to?" ──────────────────────────────────
+            print(f"  Entering destination: {destination}")
+            to_field = page.locator('input[placeholder="Where to?"]').first
+            await to_field.click()
+            await to_field.triple_click()
+            await to_field.type(destination, delay=100)
+            await asyncio.sleep(1.5)
+            await page.keyboard.press("ArrowDown")
+            await page.keyboard.press("Enter")
+            await asyncio.sleep(1)
+
+            # ── Step 4: Fill departure date ───────────────────────────────
+            print(f"  Entering date: {date}")
+            depart_field = page.locator('input[placeholder="Departure"]').first
+            await depart_field.click()
+            await asyncio.sleep(1)
+            await depart_field.triple_click()
+            await depart_field.type(date, delay=80)
+            await page.keyboard.press("Enter")
+            await asyncio.sleep(1)
+
+            # ── Step 5: Search ────────────────────────────────────────────
+            print(f"  Clicking Search...")
+            search_btn = page.locator('button:has-text("Search")').first
+            await search_btn.click()
+            await asyncio.sleep(7)  # Wait for results to load
+
+            # ── Step 6: Screenshot ────────────────────────────────────────
             screenshot_path = f"{debug_prefix}.png"
             await page.screenshot(path=screenshot_path, full_page=False)
             print(f"  Screenshot saved: {screenshot_path}")
 
-            # Save raw page text snippet for logs
+            title     = await page.title()
             page_text = await page.inner_text("body")
-            print(f"  Page text (first 800 chars):\n{page_text[:800]}")
-
-            # Check for common blocking pages
-            title = await page.title()
             print(f"  Page title: {title}")
+            print(f"  Page text preview: {page_text[:500]}")
 
-            if any(word in page_text.lower() for word in ["captcha", "unusual traffic", "verify"]):
-                print("  ⚠ Bot detection / CAPTCHA page detected")
-                send_telegram_photo(
-                    screenshot_path,
-                    f"⚠️ {origin}→{destination} {date}: Bot detection page. See screenshot."
-                )
-                return []
-
-            # ── Extract prices (two strategies) ───────────────────────────
+            # ── Step 7: Extract prices ─────────────────────────────────────
             flights = await page.evaluate("""
                 () => {
                     const results = [];
 
-                    // Strategy 1: list items containing a THB price
+                    // Strategy 1: list/row elements containing a THB price
                     const candidates = Array.from(
                         document.querySelectorAll('li, [role="listitem"], [role="row"]')
                     );
@@ -211,15 +240,13 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
                         results.push({ airline, price, duration, stops });
                     });
 
-                    // Strategy 2: full page text scan fallback
+                    // Strategy 2: full page scan fallback
                     if (results.length === 0) {
-                        const allText = document.body.innerText;
-                        const matches = [...allText.matchAll(/฿\\s?([\\d,]+)/g)];
+                        const matches = [...document.body.innerText.matchAll(/฿\\s?([\\d,]+)/g)];
                         matches.forEach(m => {
                             const price = parseInt(m[1].replace(/,/g, ''));
-                            if (price >= 1000 && price <= 500000) {
+                            if (price >= 1000 && price <= 500000)
                                 results.push({ airline: 'Unknown', price, duration: '', stops: '' });
-                            }
                         });
                     }
 
@@ -228,8 +255,7 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
                     return results.filter(r => {
                         const key = r.airline + r.price;
                         if (seen.has(key)) return false;
-                        seen.add(key);
-                        return true;
+                        seen.add(key); return true;
                     });
                 }
             """)
@@ -237,18 +263,17 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
             results = flights if flights else []
             print(f"  Found {len(results)} result(s)")
 
-            # If still no results, send the screenshot to Telegram for manual inspection
             if not results:
                 send_telegram_photo(
                     screenshot_path,
-                    f"⚠️ {origin}→{destination} {date}: No prices found. "
-                    f"Page title: '{title}'. Check screenshot."
+                    f"⚠️ {origin}→{destination} {date}: 0 prices found.\nTitle: {title}"
                 )
 
         except PlaywrightTimeout:
-            print(f"  Timeout loading page")
+            print(f"  Timeout")
         except Exception as e:
             print(f"  Error: {e}")
+            import traceback; traceback.print_exc()
         finally:
             await browser.close()
 
@@ -260,20 +285,16 @@ def price_change_label(current: int, previous: int | None) -> str:
     if previous is None:
         return "🆕 First check"
     diff = current - previous
-    if diff == 0:
-        return "➡️ No change from last check"
-    elif diff < 0:
-        return f"🟢 Down ฿{abs(diff):,} from last check"
-    else:
-        return f"🔴 Up ฿{diff:,} from last check"
+    if diff == 0:   return "➡️ No change from last check"
+    if diff < 0:    return f"🟢 Down ฿{abs(diff):,} from last check"
+    return              f"🔴 Up ฿{diff:,} from last check"
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 async def main():
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-    # Only check the first route in debug mode so we don't spam
-    # Remove the [:1] slice once scraping is confirmed working
+    # DEBUG: only first route until confirmed working — remove [:1] after that
     for route in ROUTES[:1]:
         origin      = route["origin"]
         destination = route["destination"]
@@ -283,7 +304,7 @@ async def main():
         flights = await scrape_google_flights(origin, destination, date)
 
         if not flights:
-            print(f"  No results — screenshot sent to Telegram for inspection")
+            print(f"  No results — screenshot sent to Telegram")
             continue
 
         flights.sort(key=lambda x: x["price"])
@@ -307,9 +328,8 @@ async def main():
             f"🕐 {now}  |  {CABIN_CLASS.replace('_', ' ').title()}\n"
             f"{change}\n\n"
             + "\n".join(lines)
-            + f"\n\n<a href='https://www.google.com/travel/flights/search"
-              f"?q=Flights+from+{origin}+to+{destination}&curr=THB&hl=en'>"
-              f"View on Google Flights →</a>"
+            + f"\n\n<a href='https://www.google.com/travel/flights?hl=en&curr=THB'>"
+              f"Open Google Flights →</a>"
         )
         send_telegram(msg)
 
