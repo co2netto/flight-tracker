@@ -2,15 +2,15 @@ name: Flight Price Tracker
 
 on:
   schedule:
-    - cron: '0 */4 * * *'  # Every 4 hours (00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC)
-  workflow_dispatch:         # Run manually from the Actions tab anytime
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
 
 jobs:
   track:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write        # Needed to commit prices.csv back to the repo
+      contents: write
 
     steps:
       - name: Checkout repo
@@ -33,11 +33,19 @@ jobs:
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
+      - name: Upload debug screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: debug_*.png
+          if-no-files-found: ignore
+
       - name: Save price history to repo
-        if: always()   # Run this step even if tracker.py had errors
+        if: always()
         run: |
           git config user.name  "flight-tracker-bot"
           git config user.email "bot@github-actions"
-          git add --ignore-errors prices.csv debug_*.png || true
+          git add -f prices.csv debug_*.png 2>/dev/null || true
           git diff --cached --quiet || git commit -m "price update $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push || true
