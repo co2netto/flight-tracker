@@ -168,7 +168,7 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
             print(f"  Entering origin: {origin}")
             from_field = page.locator('input[placeholder="Where from?"]').first
             await from_field.click()
-            await from_field.triple_click()
+            await from_field.click(click_count=3)
             await from_field.type(origin, delay=100)
             await asyncio.sleep(1.5)
             await page.keyboard.press("ArrowDown")
@@ -179,7 +179,7 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
             print(f"  Entering destination: {destination}")
             to_field = page.locator('input[placeholder="Where to?"]').first
             await to_field.click()
-            await to_field.triple_click()
+            await to_field.click(click_count=3)
             await to_field.type(destination, delay=100)
             await asyncio.sleep(1.5)
             await page.keyboard.press("ArrowDown")
@@ -191,7 +191,7 @@ async def scrape_google_flights(origin: str, destination: str, date: str) -> lis
             depart_field = page.locator('input[placeholder="Departure"]').first
             await depart_field.click()
             await asyncio.sleep(1)
-            await depart_field.triple_click()
+            await depart_field.click(click_count=3)
             await depart_field.type(date, delay=80)
             await page.keyboard.press("Enter")
             await asyncio.sleep(1)
