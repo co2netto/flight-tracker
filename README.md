@@ -28,7 +28,7 @@ pkg install python git -y
 ### 3. Get the code onto your phone
 Easiest route — put these 4 files into a GitHub repo, then:
 ```bash
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git flight-tracker
+git clone https://github.com/co2netto/flight-tracker.git flight-tracker
 cd flight-tracker
 ```
 
