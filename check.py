@@ -129,10 +129,10 @@ def format_stops(stops):
 
 
 def google_flights_url(origin: str, destination: str, date: str) -> str:
-    """Direct Google Flights one-way search URL."""
+    """Direct Google Flights one-way search URL (forces one-way mode)."""
     return (
         "https://www.google.com/travel/flights"
-        f"?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{date}"
+        f"?q=Flights%20to%20{destination}%20from%20{origin}%20on%20{date}%20oneway"
     )
 
 
