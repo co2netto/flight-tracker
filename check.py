@@ -44,48 +44,38 @@ HISTORY_FILE = Path("price_history.json")
 def search_cheapest(origin: str, destination: str, date: str):
     """
     Returns (price_int, airline_name, stops, duration_str) or (None, None, None, None).
-
-    Runs two queries: one unfiltered, one with max_stops=2. Keeps the cheapest
-    valid result across both. Helps surface "self-transfer" / cheap multi-stop
-    fares that the default search sometimes hides.
     """
+    try:
+        result = get_flights(
+            flight_data=[FlightData(date=date, from_airport=origin, to_airport=destination)],
+            trip="one-way",
+            seat=SEAT,
+            passengers=Passengers(adults=ADULTS, children=0, infants_in_seat=0, infants_on_lap=0),
+            fetch_mode="fallback",
+        )
+    except Exception as e:
+        print(f"  fetch error: {e}", file=sys.stderr)
+        return None, None, None, None
+
+    if not result or not getattr(result, "flights", None):
+        return None, None, None, None
+
     def parse_price(p):
         if not p:
             return None
         digits = "".join(ch for ch in str(p) if ch.isdigit())
         return int(digits) if digits else None
 
-    all_priced = []  # collected (price, flight) across both queries
-
-    for query_kwargs in ({}, {"max_stops": 2}):
-        try:
-            result = get_flights(
-                flight_data=[FlightData(date=date, from_airport=origin, to_airport=destination)],
-                trip="one-way",
-                seat=SEAT,
-                passengers=Passengers(adults=ADULTS, children=0, infants_in_seat=0, infants_on_lap=0),
-                fetch_mode="fallback",
-                **query_kwargs,
-            )
-        except Exception as e:
-            print(f"  fetch error ({query_kwargs or 'default'}): {e}", file=sys.stderr)
-            continue
-
-        if not result or not getattr(result, "flights", None):
-            continue
-
-        for f in result.flights:
-            val = parse_price(getattr(f, "price", None))
-            if val is not None and val > 0:
-                all_priced.append((val, f))
-
-        time.sleep(0.5)  # gap between the two queries
-
-    if not all_priced:
+    priced = []
+    for f in result.flights:
+        val = parse_price(getattr(f, "price", None))
+        if val is not None and val > 0:
+            priced.append((val, f))
+    if not priced:
         return None, None, None, None
 
-    all_priced.sort(key=lambda x: x[0])
-    price, flight = all_priced[0]
+    priced.sort(key=lambda x: x[0])
+    price, flight = priced[0]
     airline = getattr(flight, "name", "??") or "??"
     stops = getattr(flight, "stops", 0) or 0
     duration = getattr(flight, "duration", "") or ""
