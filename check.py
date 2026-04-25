@@ -123,7 +123,17 @@ def format_stops(stops):
     if digits:
         n = int(digits)
         return f"{n} stop" + ("s" if n > 1 else "")
-    return s  # fallback: whatever google said
+    if s == "unknown":
+        return None  # signal "no stop info"
+    return s
+
+
+def google_flights_url(origin: str, destination: str, date: str) -> str:
+    """Direct Google Flights one-way search URL."""
+    return (
+        "https://www.google.com/travel/flights"
+        f"?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{date}"
+    )
 
 
 def trend_marker(current: float, previous):
@@ -161,18 +171,33 @@ def main() -> int:
 
         if price is None:
             line = (
-                f"<code>{route['origin']}→{route['destination']} "
-                f"{route['date']}</code>  no data"
+                f'<a href="{google_flights_url(route["origin"], route["destination"], route["date"])}">'
+                f'{route["origin"]}→{route["destination"]} {route["date"]}</a>  no data'
             )
         else:
             marker = trend_marker(price, prev)
             stop_txt = format_stops(stops)
-            dur_txt = f", {duration}" if duration else ""
+            airline_clean = airline if airline and airline != "??" else None
+
+            # Build details bracket only from fields we actually have
+            details_parts = []
+            if airline_clean:
+                details_parts.append(airline_clean[:25])
+            if stop_txt:
+                details_parts.append(stop_txt)
+            if duration:
+                details_parts.append(duration)
+
+            if details_parts:
+                details = " (" + ", ".join(details_parts) + ")"
+            else:
+                details = " <i>(details unavailable)</i>"
+
+            url = google_flights_url(route["origin"], route["destination"], route["date"])
             line = (
-                f"<code>{route['origin']}→{route['destination']} "
-                f"{route['date']}</code>  "
-                f"<b>{price:,} {CURRENCY_LABEL}</b> "
-                f"({airline[:25]}, {stop_txt}{dur_txt}) {marker}"
+                f'<a href="{url}">{route["origin"]}→{route["destination"]} '
+                f'{route["date"]}</a>  '
+                f"<b>{price:,} {CURRENCY_LABEL}</b>{details} {marker}"
             )
             entry = history.get(k, {"history": []})
             entry["last_price"] = price
