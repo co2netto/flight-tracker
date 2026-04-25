@@ -43,7 +43,7 @@ HISTORY_FILE = Path("price_history.json")
 
 def search_cheapest(origin: str, destination: str, date: str):
     """
-    Returns (price_int, airline_name, stops_int) or (None, None, None).
+    Returns (price_int, airline_name, stops, duration_str) or (None, None, None, None).
     """
     try:
         result = get_flights(
@@ -55,12 +55,11 @@ def search_cheapest(origin: str, destination: str, date: str):
         )
     except Exception as e:
         print(f"  fetch error: {e}", file=sys.stderr)
-        return None, None, None
+        return None, None, None, None
 
     if not result or not getattr(result, "flights", None):
-        return None, None, None
+        return None, None, None, None
 
-    # Each flight has .price like "$1,234" or "฿42,500"; strip non-digits.
     def parse_price(p):
         if not p:
             return None
@@ -70,16 +69,17 @@ def search_cheapest(origin: str, destination: str, date: str):
     priced = []
     for f in result.flights:
         val = parse_price(getattr(f, "price", None))
-        if val is not None:
+        if val is not None and val > 0:
             priced.append((val, f))
     if not priced:
-        return None, None, None
+        return None, None, None, None
 
     priced.sort(key=lambda x: x[0])
     price, flight = priced[0]
     airline = getattr(flight, "name", "??") or "??"
     stops = getattr(flight, "stops", 0) or 0
-    return price, airline, stops
+    duration = getattr(flight, "duration", "") or ""
+    return price, airline, stops, duration
 
 
 # ---------- History ----------
@@ -114,6 +114,18 @@ def send_telegram(bot_token: str, chat_id: str, text: str) -> None:
     resp.raise_for_status()
 
 
+def format_stops(stops):
+    """Normalize fast-flights' varied stop formats into readable text."""
+    s = str(stops).lower().strip()
+    if s in ("0", "", "none", "nonstop", "non-stop", "direct"):
+        return "direct"
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if digits:
+        n = int(digits)
+        return f"{n} stop" + ("s" if n > 1 else "")
+    return s  # fallback: whatever google said
+
+
 def trend_marker(current: float, previous):
     if previous is None:
         return "🆕"
@@ -143,7 +155,7 @@ def main() -> int:
         k = route_key(route)
         print(f"Checking {k}…")
         prev = history.get(k, {}).get("last_price")
-        price, airline, stops = search_cheapest(
+        price, airline, stops, duration = search_cheapest(
             route["origin"], route["destination"], route["date"]
         )
 
@@ -154,12 +166,13 @@ def main() -> int:
             )
         else:
             marker = trend_marker(price, prev)
-            stop_txt = "direct" if stops == 0 else f"{stops} stop{'s' if stops > 1 else ''}"
+            stop_txt = format_stops(stops)
+            dur_txt = f", {duration}" if duration else ""
             line = (
                 f"<code>{route['origin']}→{route['destination']} "
                 f"{route['date']}</code>  "
                 f"<b>{price:,} {CURRENCY_LABEL}</b> "
-                f"({airline[:20]}, {stop_txt}) {marker}"
+                f"({airline[:25]}, {stop_txt}{dur_txt}) {marker}"
             )
             entry = history.get(k, {"history": []})
             entry["last_price"] = price
