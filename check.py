@@ -38,13 +38,12 @@ ROUTES = [
     # One-way: return from Queenstown
     {"origin": "ZQN", "destination": "BKK", "date": "2026-08-01"},
     {"origin": "ZQN", "destination": "BKK", "date": "2026-08-02"},
-    # Round-trip: BKK <-> DAD on Vietjet only
+    # Round-trip: BKK <-> DAD (verify link to confirm VZ flights)
     {
         "origin": "BKK",
         "destination": "DAD",
         "date": "2026-05-30",
         "return_date": "2026-06-03",
-        "airlines": ["VZ"],
     },
     # One-way pair: BKK <-> DAD any airline (catches non-Vietjet alternatives)
     {"origin": "BKK", "destination": "DAD", "date": "2026-05-30"},
