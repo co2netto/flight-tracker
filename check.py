@@ -28,16 +28,7 @@ from fast_flights import FlightData, Passengers, get_flights
 # ---------- Configuration ----------
 
 ROUTES = [
-    # One-way: outbound to Queenstown
-    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-16"},
-    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-17"},
-    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-18"},
-    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-16"},
-    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-17"},
-    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-18"},
-    # One-way: return from Queenstown
-    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-01"},
-    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-02"},
+    # ---- Da Nang trip (May 30 – June 3) ----
     # Round-trip: BKK <-> DAD targeting VZ964 outbound (08:10).
     # Return leg arrival isn't exposed in fast-flights data, so we can only filter outbound.
     {
@@ -72,6 +63,18 @@ ROUTES = [
         "departure_window": ("17:30", "18:50"),
         "label_suffix": "VZ963",
     },
+
+    # ---- Queenstown trip (Jul 16 – Aug 2) ----
+    # One-way: outbound to Queenstown
+    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-16"},
+    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-17"},
+    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-18"},
+    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-16"},
+    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-17"},
+    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-18"},
+    # One-way: return from Queenstown
+    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-01"},
+    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-02"},
 ]
 
 ADULTS = 1
@@ -433,6 +436,14 @@ def main() -> int:
 
         time.sleep(1)
 
+    if rt_lines:
+        lines.append("<b>Round-trip</b>")
+        lines.extend(rt_lines)
+        lines.append("")
+    if other_lines:
+        lines.append("<b>Other one-way</b>")
+        lines.extend(other_lines)
+        lines.append("")
     if outbound_lines:
         lines.append("<b>Outbound → ZQN</b>")
         lines.extend(outbound_lines)
@@ -440,14 +451,6 @@ def main() -> int:
     if return_lines:
         lines.append("<b>Return ← BKK</b>")
         lines.extend(return_lines)
-        lines.append("")
-    if other_lines:
-        lines.append("<b>Other one-way</b>")
-        lines.extend(other_lines)
-        lines.append("")
-    if rt_lines:
-        lines.append("<b>Round-trip</b>")
-        lines.extend(rt_lines)
         lines.append("")
 
     # All-time low per currently-tracked route (in the order they appear in ROUTES)
