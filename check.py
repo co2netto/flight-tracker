@@ -38,17 +38,16 @@ ROUTES = [
     # One-way: return from Queenstown
     {"origin": "ZQN", "destination": "BKK", "date": "2026-08-01"},
     {"origin": "ZQN", "destination": "BKK", "date": "2026-08-02"},
-    # Round-trip: BKK <-> DAD, attempt to match VZ963 return arrival 19:55
-    # NOTE: fast-flights may not expose return-leg times, so this may yield no data.
+    # Round-trip: BKK <-> DAD targeting VZ964 outbound (08:10).
+    # Return leg arrival isn't exposed in fast-flights data, so we can only filter outbound.
     {
         "origin": "BKK",
         "destination": "DAD",
         "date": "2026-05-30",
         "return_date": "2026-06-03",
         "airlines_match": ["vietjet"],
-        "return_arrival_window": ("19:00", "20:30"),
-        "label_suffix": "VZ964+VZ963?",
-        "debug": True,
+        "departure_window": ("07:30", "08:50"),
+        "label_suffix": "VZ964 RT",
     },
     # One-way pair: BKK <-> DAD any airline (catches non-Vietjet alternatives)
     {"origin": "BKK", "destination": "DAD", "date": "2026-05-30"},
@@ -61,9 +60,10 @@ ROUTES = [
         "airlines_match": ["vietjet"],
         "departure_window": ("07:30", "08:50"),
         "label_suffix": "VZ964",
-        "debug": True,
     },
     # Targeted: VZ963 DAD->BKK departing 18:10
+    # Note: in earlier debug, fast-flights returned empty metadata for DAD departures,
+    # so this filter may exclude everything. If "no data" persists, drop the filters.
     {
         "origin": "DAD",
         "destination": "BKK",
@@ -71,7 +71,6 @@ ROUTES = [
         "airlines_match": ["vietjet"],
         "departure_window": ("17:30", "18:50"),
         "label_suffix": "VZ963",
-        "debug": True,
     },
 ]
 
@@ -92,12 +91,17 @@ def parse_price(p):
 
 
 def parse_time_str(s):
-    """Parse a time string like '06:30', '6:30 AM', '15:45+1' into minutes-since-midnight.
-    Returns int or None. The '+1' (next-day arrival) is stripped — we only care about hh:mm.
+    """Parse a time string into minutes-since-midnight.
+    Handles many formats:
+      '06:30', '6:30', '6:30 AM', '15:45+1', '8:10 AM on Sat, May 30'
+    Returns int or None.
     """
     if not s:
         return None
     s = str(s).strip()
+    # Strip trailing date context like " on Sat, May 30"
+    if " on " in s:
+        s = s.split(" on ")[0].strip()
     # Strip any trailing '+1', '+2' (next-day indicators)
     s = s.split("+")[0].strip()
     # Handle "6:30 AM" / "6:30 PM"
