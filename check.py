@@ -450,12 +450,27 @@ def main() -> int:
         lines.extend(rt_lines)
         lines.append("")
 
-    lows = [(k, v["min_price"]) for k, v in history.items() if "min_price" in v]
-    if lows:
-        lows.sort(key=lambda x: x[1])
-        lines.append("<b>All-time lows (top 3)</b>")
-        for k, p in lows[:3]:
-            lines.append(f"<code>{k}</code>  {p:,} {CURRENCY_LABEL}")
+    # All-time low per currently-tracked route (in the order they appear in ROUTES)
+    lows_lines = []
+    for route in ROUTES:
+        k = route_key(route)
+        entry = history.get(k)
+        if not entry or "min_price" not in entry:
+            continue
+        min_price = entry["min_price"]
+        last_price = entry.get("last_price")
+        # Mark with 🔥 if the current price is at or below the all-time low
+        marker = " 🔥" if last_price is not None and last_price <= min_price else ""
+        # Show date the low was recorded (first 10 chars of timestamp = YYYY-MM-DD)
+        when = (entry.get("min_price_at") or "")[:10]
+        when_str = f" (on {when})" if when else ""
+        lows_lines.append(
+            f"<code>{route_label(route)}</code>  "
+            f"{min_price:,} {CURRENCY_LABEL}{when_str}{marker}"
+        )
+    if lows_lines:
+        lines.append("<b>All-time lows</b>")
+        lines.extend(lows_lines)
 
     message = "\n".join(lines)
 
