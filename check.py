@@ -48,6 +48,7 @@ ROUTES = [
         "airlines_match": ["vietjet"],
         "return_arrival_window": ("19:00", "20:30"),
         "label_suffix": "VZ964+VZ963?",
+        "debug": True,
     },
     # One-way pair: BKK <-> DAD any airline (catches non-Vietjet alternatives)
     {"origin": "BKK", "destination": "DAD", "date": "2026-05-30"},
@@ -60,6 +61,7 @@ ROUTES = [
         "airlines_match": ["vietjet"],
         "departure_window": ("07:30", "08:50"),
         "label_suffix": "VZ964",
+        "debug": True,
     },
     # Targeted: VZ963 DAD->BKK departing 18:10
     {
@@ -69,6 +71,7 @@ ROUTES = [
         "airlines_match": ["vietjet"],
         "departure_window": ("17:30", "18:50"),
         "label_suffix": "VZ963",
+        "debug": True,
     },
 ]
 
@@ -197,6 +200,8 @@ def search_cheapest(route: dict):
       - airlines_match: list of substrings to match in airline name (case-insensitive)
       - departure_window: ("HH:MM", "HH:MM") — outbound departure must fall inside
       - arrival_window:   ("HH:MM", "HH:MM") — outbound arrival must fall inside
+      - return_arrival_window: ("HH:MM", "HH:MM") — return-leg arrival (round-trip only)
+      - debug: True to print all matching flights' raw data
     """
     is_roundtrip = bool(route.get("return_date"))
     flight_data = [FlightData(
@@ -225,6 +230,22 @@ def search_cheapest(route: dict):
 
     if not result or not getattr(result, "flights", None):
         return None, None, None, None
+
+    # Diagnostic mode: print all candidates that match airline filter (before time filter)
+    if route.get("debug"):
+        print(f"  DEBUG dump for {route.get('label_suffix', 'route')}:")
+        for f in result.flights:
+            name = getattr(f, "name", "??")
+            dep = getattr(f, "departure", "??")
+            arr = getattr(f, "arrival", "??")
+            dur = getattr(f, "duration", "??")
+            stops_v = getattr(f, "stops", "??")
+            price_v = getattr(f, "price", "??")
+            wanted = route.get("airlines_match")
+            tag = ""
+            if wanted and any(a.lower() in str(name).lower() for a in wanted):
+                tag = " <-- airline match"
+            print(f"    {name} | dep={dep} arr={arr} dur={dur} stops={stops_v} price={price_v}{tag}")
 
     priced = []
     for f in result.flights:
