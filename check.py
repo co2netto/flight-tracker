@@ -38,16 +38,38 @@ ROUTES = [
     # One-way: return from Queenstown
     {"origin": "ZQN", "destination": "BKK", "date": "2026-08-01"},
     {"origin": "ZQN", "destination": "BKK", "date": "2026-08-02"},
-    # Round-trip: BKK <-> DAD (verify link to confirm VZ flights)
+    # Round-trip: BKK <-> DAD, attempt to match VZ963 return arrival 19:55
+    # NOTE: fast-flights may not expose return-leg times, so this may yield no data.
     {
         "origin": "BKK",
         "destination": "DAD",
         "date": "2026-05-30",
         "return_date": "2026-06-03",
+        "airlines_match": ["vietjet"],
+        "return_arrival_window": ("19:00", "20:30"),
+        "label_suffix": "VZ964+VZ963?",
     },
     # One-way pair: BKK <-> DAD any airline (catches non-Vietjet alternatives)
     {"origin": "BKK", "destination": "DAD", "date": "2026-05-30"},
     {"origin": "DAD", "destination": "BKK", "date": "2026-06-03"},
+    # Targeted: VZ964 BKK->DAD departing 08:10
+    {
+        "origin": "BKK",
+        "destination": "DAD",
+        "date": "2026-05-30",
+        "airlines_match": ["vietjet"],
+        "departure_window": ("07:30", "08:50"),
+        "label_suffix": "VZ964",
+    },
+    # Targeted: VZ963 DAD->BKK departing 18:10
+    {
+        "origin": "DAD",
+        "destination": "BKK",
+        "date": "2026-06-03",
+        "airlines_match": ["vietjet"],
+        "departure_window": ("17:30", "18:50"),
+        "label_suffix": "VZ963",
+    },
 ]
 
 ADULTS = 1
@@ -66,12 +88,115 @@ def parse_price(p):
     return int(digits) if digits else None
 
 
+def parse_time_str(s):
+    """Parse a time string like '06:30', '6:30 AM', '15:45+1' into minutes-since-midnight.
+    Returns int or None. The '+1' (next-day arrival) is stripped — we only care about hh:mm.
+    """
+    if not s:
+        return None
+    s = str(s).strip()
+    # Strip any trailing '+1', '+2' (next-day indicators)
+    s = s.split("+")[0].strip()
+    # Handle "6:30 AM" / "6:30 PM"
+    ampm = None
+    s_upper = s.upper()
+    if "AM" in s_upper:
+        ampm = "AM"
+        s = s_upper.replace("AM", "").strip()
+    elif "PM" in s_upper:
+        ampm = "PM"
+        s = s_upper.replace("PM", "").strip()
+    # Parse hh:mm
+    if ":" not in s:
+        return None
+    try:
+        hh, mm = s.split(":")[:2]
+        h = int(hh)
+        m = int(mm)
+    except ValueError:
+        return None
+    if ampm == "PM" and h < 12:
+        h += 12
+    if ampm == "AM" and h == 12:
+        h = 0
+    return h * 60 + m
+
+
+def in_time_window(time_str, window):
+    """window is a (start_str, end_str) tuple like ('08:00', '12:00').
+    Returns True if time_str falls inside it. None values mean no constraint on that side.
+    """
+    if not window:
+        return True
+    t = parse_time_str(time_str)
+    if t is None:
+        return False  # can't filter what we can't parse → exclude
+    start = parse_time_str(window[0]) if window[0] else None
+    end = parse_time_str(window[1]) if window[1] else None
+    if start is not None and t < start:
+        return False
+    if end is not None and t > end:
+        return False
+    return True
+
+
+def matches_route_filters(flight, route):
+    """Apply post-fetch filters: airlines, departure_window."""
+    # Airline name filter (substring match, case-insensitive)
+    wanted_airlines = route.get("airlines_match")
+    if wanted_airlines:
+        name = str(getattr(flight, "name", "")).lower()
+        if not any(a.lower() in name for a in wanted_airlines):
+            return False
+
+    # Departure time window: tuple/list of (start, end) like ("08:00", "12:00")
+    dep_window = route.get("departure_window")
+    if dep_window:
+        if not in_time_window(getattr(flight, "departure", None), dep_window):
+            return False
+
+    # Arrival time window
+    arr_window = route.get("arrival_window")
+    if arr_window:
+        if not in_time_window(getattr(flight, "arrival", None), arr_window):
+            return False
+
+    # Return-leg arrival window (round-trip only). Best-effort:
+    # fast-flights typically exposes only outbound times, so this may exclude
+    # everything if the data isn't present. We try a few likely attribute names.
+    ret_arr_window = route.get("return_arrival_window")
+    if ret_arr_window:
+        candidates = [
+            getattr(flight, "return_arrival", None),
+            getattr(flight, "arrival_return", None),
+        ]
+        # Some libraries expose .legs or .return_flight
+        legs = getattr(flight, "legs", None)
+        if legs and len(legs) >= 2:
+            candidates.append(getattr(legs[-1], "arrival", None))
+        return_flight = getattr(flight, "return_flight", None)
+        if return_flight is not None:
+            candidates.append(getattr(return_flight, "arrival", None))
+
+        # If we found any candidate, require at least one in window
+        candidates = [c for c in candidates if c]
+        if not candidates:
+            return False  # no data → can't confirm → exclude
+        if not any(in_time_window(c, ret_arr_window) for c in candidates):
+            return False
+
+    return True
+
+
 def search_cheapest(route: dict):
     """
     Returns (price_int, airline_name, stops, duration_str) or (None,)*4.
 
     Handles one-way or round-trip based on whether route has 'return_date'.
-    Optionally filters by airline IATA codes.
+    Post-fetch filters supported via route fields:
+      - airlines_match: list of substrings to match in airline name (case-insensitive)
+      - departure_window: ("HH:MM", "HH:MM") — outbound departure must fall inside
+      - arrival_window:   ("HH:MM", "HH:MM") — outbound arrival must fall inside
     """
     is_roundtrip = bool(route.get("return_date"))
     flight_data = [FlightData(
@@ -86,30 +211,14 @@ def search_cheapest(route: dict):
             to_airport=route["origin"],
         ))
 
-    kwargs = {
-        "flight_data": flight_data,
-        "trip": "round-trip" if is_roundtrip else "one-way",
-        "seat": SEAT,
-        "passengers": Passengers(adults=ADULTS, children=0, infants_in_seat=0, infants_on_lap=0),
-        "fetch_mode": "fallback",
-    }
-
-    # Optional airline filter
-    airlines = route.get("airlines")
-    if airlines:
-        # Library accepts a list of IATA codes via this parameter; ignored if unsupported
-        kwargs["airlines"] = airlines
-
     try:
-        result = get_flights(**kwargs)
-    except TypeError:
-        # In case 'airlines' kwarg is rejected by this version of fast-flights, retry without it
-        kwargs.pop("airlines", None)
-        try:
-            result = get_flights(**kwargs)
-        except Exception as e:
-            print(f"  fetch error: {e}", file=sys.stderr)
-            return None, None, None, None
+        result = get_flights(
+            flight_data=flight_data,
+            trip="round-trip" if is_roundtrip else "one-way",
+            seat=SEAT,
+            passengers=Passengers(adults=ADULTS, children=0, infants_in_seat=0, infants_on_lap=0),
+            fetch_mode="fallback",
+        )
     except Exception as e:
         print(f"  fetch error: {e}", file=sys.stderr)
         return None, None, None, None
@@ -120,8 +229,12 @@ def search_cheapest(route: dict):
     priced = []
     for f in result.flights:
         val = parse_price(getattr(f, "price", None))
-        if val is not None and val > 0:
-            priced.append((val, f))
+        if val is None or val <= 0:
+            continue
+        if not matches_route_filters(f, route):
+            continue
+        priced.append((val, f))
+
     if not priced:
         return None, None, None, None
 
@@ -177,23 +290,22 @@ def trend_marker(current: float, previous):
 
 
 def route_label(route: dict) -> str:
+    suffix = route.get("label_suffix")
+    suffix_tag = f" [{suffix}]" if suffix else ""
     if route.get("return_date"):
-        airline_tag = ""
-        if route.get("airlines"):
-            airline_tag = f" [{'/'.join(route['airlines'])}]"
         return (
             f"{route['origin']}↔{route['destination']} "
-            f"{route['date']}/{route['return_date']}{airline_tag}"
+            f"{route['date']}/{route['return_date']}{suffix_tag}"
         )
-    return f"{route['origin']}→{route['destination']} {route['date']}"
+    return f"{route['origin']}→{route['destination']} {route['date']}{suffix_tag}"
 
 
 def route_key(route: dict) -> str:
+    suffix = route.get("label_suffix", "")
+    suffix_tag = f"-{suffix}" if suffix else ""
     if route.get("return_date"):
-        a = "+".join(route.get("airlines", []))
-        suffix = f"-{a}" if a else ""
-        return f"RT-{route['origin']}-{route['destination']}-{route['date']}-{route['return_date']}{suffix}"
-    return f"{route['origin']}-{route['destination']}-{route['date']}"
+        return f"RT-{route['origin']}-{route['destination']}-{route['date']}-{route['return_date']}{suffix_tag}"
+    return f"{route['origin']}-{route['destination']}-{route['date']}{suffix_tag}"
 
 
 def load_history() -> dict:
