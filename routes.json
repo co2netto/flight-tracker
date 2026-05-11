@@ -1,0 +1,72 @@
+{
+  "_comment": "Routes monitored by check.py (fast-flights) and check_fli.py (fli).",
+  "_format": {
+    "origin": "IATA airport code (required)",
+    "destination": "IATA airport code (required)",
+    "date": "YYYY-MM-DD outbound date (required)",
+    "return_date": "YYYY-MM-DD return date (optional, makes it round-trip)",
+    "label_suffix": "tag shown in brackets and used as history key (optional)",
+    "departure_window": "[\"HH:MM\", \"HH:MM\"] outbound departure time window (optional)",
+    "arrival_window": "[\"HH:MM\", \"HH:MM\"] outbound arrival time window (optional)",
+    "return_departure_window": "[\"HH:MM\", \"HH:MM\"] return-leg departure (fli only)",
+    "airlines_match": "[\"vietjet\"] substring match on airline name (fast-flights only)",
+    "flight_number": "VZ964 exact flight number match (fli only)"
+  },
+  "routes": [
+    {
+      "_section": "Da Nang trip (May 30 - June 3)"
+    },
+    {
+      "origin": "BKK",
+      "destination": "DAD",
+      "date": "2026-05-30",
+      "return_date": "2026-06-03",
+      "departure_window": ["06:00", "12:00"],
+      "return_departure_window": ["17:00", "22:00"],
+      "label_suffix": "AM out / PM back"
+    },
+    {
+      "origin": "BKK",
+      "destination": "DAD",
+      "date": "2026-05-30"
+    },
+    {
+      "origin": "DAD",
+      "destination": "BKK",
+      "date": "2026-06-03"
+    },
+    {
+      "origin": "BKK",
+      "destination": "DAD",
+      "date": "2026-05-30",
+      "departure_window": ["06:00", "12:00"],
+      "label_suffix": "AM"
+    },
+    {
+      "origin": "DAD",
+      "destination": "BKK",
+      "date": "2026-06-03",
+      "departure_window": ["17:00", "22:00"],
+      "label_suffix": "PM"
+    },
+
+    {
+      "_section": "Queenstown trip (Jul 16 - Aug 2)"
+    },
+    {
+      "origin": "BKK",
+      "destination": "ZQN",
+      "date": "2026-07-16",
+      "return_date": "2026-08-01",
+      "label_suffix": "BKK-ZQN Round"
+    },
+    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-16"},
+    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-17"},
+    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-18"},
+    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-16"},
+    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-17"},
+    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-18"},
+    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-01"},
+    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-02"}
+  ]
+}
