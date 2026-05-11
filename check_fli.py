@@ -48,7 +48,11 @@ ROUTES_FILE = Path(__file__).parent / "routes.json"
 
 
 def load_routes():
-    """Load route definitions from routes.json."""
+    """Load route definitions from routes.json.
+    Returns a list mixing section-marker dicts and route dicts, preserving order.
+    Section markers have key '_section' and a string value.
+    Route entries have 'origin'/'destination'/'date'.
+    """
     if not ROUTES_FILE.exists():
         print(f"ERROR: {ROUTES_FILE} not found", file=sys.stderr)
         sys.exit(1)
@@ -59,8 +63,11 @@ def load_routes():
     for entry in raw:
         if not isinstance(entry, dict):
             continue
-        if "_section" in entry or "origin" not in entry:
+        if "_section" in entry:
+            out.append({"_section": entry["_section"]})
             continue
+        if "origin" not in entry:
+            continue  # other comments like format reference
         for key in ("departure_window", "arrival_window", "return_departure_window"):
             if key in entry and isinstance(entry[key], list):
                 entry[key] = tuple(entry[key])
@@ -68,7 +75,8 @@ def load_routes():
     return out
 
 
-ROUTES = load_routes()
+ROUTES_AND_SECTIONS = load_routes()
+ROUTES = [r for r in ROUTES_AND_SECTIONS if "_section" not in r]
 
 ADULTS = 1
 CURRENCY_LABEL = "THB"  # fli typically returns USD; we display whatever the API gives
@@ -356,9 +364,17 @@ def main() -> int:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     lines = [f"<b>🔬 Flight check (fli) — {ts}</b>", ""]
-    outbound_lines, return_lines, rt_lines, other_lines = [], [], [], []
 
-    for route in ROUTES:
+    # Walk routes.json entries in order. Emit a header for each {_section: "..."} marker,
+    # then the result line for each real route. This makes the Telegram output mirror
+    # the structure of routes.json so you can reorder/group there.
+    for entry in ROUTES_AND_SECTIONS:
+        if "_section" in entry:
+            lines.append("")
+            lines.append(f"<b>{entry['_section']}</b>")
+            continue
+
+        route = entry
         k = route_key(route)
         label = route_label(route)
         print(f"Checking {label}…")
@@ -404,42 +420,19 @@ def main() -> int:
                 f"<b>{price:,.0f} {CURRENCY_LABEL}</b>{details} {marker}{ret_info}"
             )
 
-            entry = history.get(k, {"history": []})
-            entry["last_price"] = price
-            entry["last_checked"] = ts
-            entry["history"] = (entry.get("history", []) + [{"ts": ts, "price": price}])[-100:]
-            if "min_price" not in entry or price < entry["min_price"]:
-                entry["min_price"] = price
-                entry["min_price_at"] = ts
-            history[k] = entry
+            entry_hist = history.get(k, {"history": []})
+            entry_hist["last_price"] = price
+            entry_hist["last_checked"] = ts
+            entry_hist["history"] = (entry_hist.get("history", []) + [{"ts": ts, "price": price}])[-100:]
+            if "min_price" not in entry_hist or price < entry_hist["min_price"]:
+                entry_hist["min_price"] = price
+                entry_hist["min_price_at"] = ts
+            history[k] = entry_hist
 
-        if route.get("return_date"):
-            rt_lines.append(line)
-        elif route["destination"] == "ZQN":
-            outbound_lines.append(line)
-        elif route["origin"] == "ZQN":
-            return_lines.append(line)
-        else:
-            other_lines.append(line)
-
+        lines.append(line)
         time.sleep(1)
 
-    if rt_lines:
-        lines.append("<b>Round-trip</b>")
-        lines.extend(rt_lines)
-        lines.append("")
-    if other_lines:
-        lines.append("<b>Other one-way</b>")
-        lines.extend(other_lines)
-        lines.append("")
-    if outbound_lines:
-        lines.append("<b>Outbound → ZQN</b>")
-        lines.extend(outbound_lines)
-        lines.append("")
-    if return_lines:
-        lines.append("<b>Return ← BKK</b>")
-        lines.extend(return_lines)
-        lines.append("")
+    lines.append("")
 
     # All-time lows per tracked route
     lows_lines = []
