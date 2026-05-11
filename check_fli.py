@@ -180,12 +180,9 @@ def search_cheapest(route: dict):
     for r in results:
         if is_roundtrip:
             outbound, ret = r
-            total_price = (
-                getattr(outbound, "price", 0) or 0
-            ) + (
-                getattr(ret, "price", 0) or 0
-            )
-            # Use outbound as the "main" flight for display
+            # fli returns the SAME round-trip price on both outbound and return objects
+            # (it's the total RT price, not per-leg). Use outbound's price directly.
+            total_price = getattr(outbound, "price", 0) or 0
             candidates.append((total_price, outbound, ret))
         else:
             candidates.append((getattr(r, "price", 0) or 0, r, None))
