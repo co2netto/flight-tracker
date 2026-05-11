@@ -41,46 +41,34 @@ from fli.search import SearchFlights
 
 # ---------- Configuration ----------
 
-# Routes use the same dict format as check.py, plus optional `flight_number` filter
-# for exact matching (e.g. "VZ964"). When flight_number is set, only flights whose
-# first leg matches that number are considered.
-ROUTES = [
-    # ---- Da Nang trip (May 30 – June 3) ----
-    {
-        "origin": "BKK",
-        "destination": "DAD",
-        "date": "2026-05-30",
-        "return_date": "2026-06-03",
-        "label_suffix": "VZ964 RT",
-        "flight_number": "VZ964",  # outbound leg only
-    },
-    {"origin": "BKK", "destination": "DAD", "date": "2026-05-30"},
-    {"origin": "DAD", "destination": "BKK", "date": "2026-06-03"},
-    {
-        "origin": "BKK",
-        "destination": "DAD",
-        "date": "2026-05-30",
-        "label_suffix": "VZ964",
-        "flight_number": "VZ964",
-    },
-    {
-        "origin": "DAD",
-        "destination": "BKK",
-        "date": "2026-06-03",
-        "label_suffix": "VZ963",
-        "flight_number": "VZ963",
-    },
+# Routes are loaded from routes.json (shared with check.py).
+# Edit routes.json to add/remove/reorder flights — no need to touch this file.
 
-    # ---- Queenstown trip (Jul 16 – Aug 2) ----
-    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-16"},
-    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-17"},
-    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-18"},
-    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-16"},
-    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-17"},
-    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-18"},
-    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-01"},
-    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-02"},
-]
+ROUTES_FILE = Path(__file__).parent / "routes.json"
+
+
+def load_routes():
+    """Load route definitions from routes.json."""
+    if not ROUTES_FILE.exists():
+        print(f"ERROR: {ROUTES_FILE} not found", file=sys.stderr)
+        sys.exit(1)
+    with open(ROUTES_FILE) as f:
+        data = json.load(f)
+    raw = data.get("routes", [])
+    out = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        if "_section" in entry or "origin" not in entry:
+            continue
+        for key in ("departure_window", "arrival_window", "return_departure_window"):
+            if key in entry and isinstance(entry[key], list):
+                entry[key] = tuple(entry[key])
+        out.append(entry)
+    return out
+
+
+ROUTES = load_routes()
 
 ADULTS = 1
 CURRENCY_LABEL = "THB"  # fli typically returns USD; we display whatever the API gives
@@ -98,6 +86,34 @@ def airport_enum(code: str):
         raise ValueError(f"Airport code '{code}' not in fli's Airport enum")
 
 
+def parse_time_str(s):
+    """'HH:MM' -> minutes since midnight."""
+    if not s:
+        return None
+    try:
+        hh, mm = s.split(":")[:2]
+        return int(hh) * 60 + int(mm)
+    except (ValueError, AttributeError):
+        return None
+
+
+def in_window(dt, window):
+    """Check if a datetime falls within the (start_str, end_str) window."""
+    if not window or not dt:
+        return True
+    try:
+        t_minutes = dt.hour * 60 + dt.minute
+    except AttributeError:
+        return False
+    start = parse_time_str(window[0]) if window[0] else None
+    end = parse_time_str(window[1]) if window[1] else None
+    if start is not None and t_minutes < start:
+        return False
+    if end is not None and t_minutes > end:
+        return False
+    return True
+
+
 def flight_number_matches(flight, wanted: str) -> bool:
     """Check if the first leg's flight number matches wanted (e.g. 'VZ964')."""
     if not flight or not getattr(flight, "legs", None):
@@ -111,8 +127,7 @@ def flight_number_matches(flight, wanted: str) -> bool:
 
 def search_cheapest(route: dict):
     """
-    Returns (price_float, airline_name, stops, duration_min, flight_no, dep_time)
-    or all None if no results.
+    Returns a dict with flight info, or None if no results.
     """
     is_roundtrip = bool(route.get("return_date"))
 
@@ -146,10 +161,10 @@ def search_cheapest(route: dict):
         results = search.search(filters)
     except Exception as e:
         print(f"  fetch error: {e}", file=sys.stderr)
-        return (None,) * 6
+        return None
 
     if not results:
-        return (None,) * 6
+        return None
 
     # Normalize: round-trip returns list of (outbound, return) tuples;
     # one-way returns list of Flight objects.
@@ -172,34 +187,75 @@ def search_cheapest(route: dict):
     if wanted_flight:
         candidates = [c for c in candidates if flight_number_matches(c[1], wanted_flight)]
 
+    # Apply departure_window filter (on outbound leg's first departure)
+    dep_window = route.get("departure_window")
+    if dep_window:
+        def in_dep_window(c):
+            _price, flight, _ret = c
+            legs = getattr(flight, "legs", None)
+            if not legs:
+                return False
+            return in_window(getattr(legs[0], "departure_datetime", None), dep_window)
+        candidates = [c for c in candidates if in_dep_window(c)]
+
+    # Apply return_departure_window filter (round-trip only; uses return flight's first leg)
+    ret_dep_window = route.get("return_departure_window")
+    if ret_dep_window:
+        def in_ret_dep_window(c):
+            _price, _outbound, ret_flight = c
+            if ret_flight is None:
+                return False
+            ret_legs = getattr(ret_flight, "legs", None)
+            if not ret_legs:
+                return False
+            return in_window(getattr(ret_legs[0], "departure_datetime", None), ret_dep_window)
+        candidates = [c for c in candidates if in_ret_dep_window(c)]
+
     # Filter out zero prices
     candidates = [c for c in candidates if c[0] and c[0] > 0]
 
     if not candidates:
-        return (None,) * 6
+        return None
 
     candidates.sort(key=lambda x: x[0])
-    price, flight, _ret = candidates[0]
+    price, flight, ret_flight = candidates[0]
 
-    leg0 = flight.legs[0] if getattr(flight, "legs", None) else None
-    airline_name = ""
-    flight_no = ""
-    dep_time = ""
-    if leg0:
+    def extract_leg_info(flight_obj):
+        if not flight_obj:
+            return "", "", ""
+        legs = getattr(flight_obj, "legs", None)
+        if not legs:
+            return "", "", ""
+        leg0 = legs[0]
         airline_obj = getattr(leg0, "airline", None)
-        airline_name = getattr(airline_obj, "name", None) or getattr(airline_obj, "value", "") or ""
-        flight_no = getattr(leg0, "flight_number", "") or ""
+        airline = getattr(airline_obj, "name", None) or getattr(airline_obj, "value", "") or ""
+        fno = getattr(leg0, "flight_number", "") or ""
         dep_dt = getattr(leg0, "departure_datetime", None)
+        dep = ""
         if dep_dt:
             try:
-                dep_time = dep_dt.strftime("%H:%M")
+                dep = dep_dt.strftime("%H:%M")
             except AttributeError:
-                dep_time = str(dep_dt)
+                dep = str(dep_dt)
+        return airline, fno, dep
+
+    airline_name, flight_no, dep_time = extract_leg_info(flight)
+    ret_airline, ret_flight_no, ret_dep_time = extract_leg_info(ret_flight)
 
     stops = getattr(flight, "stops", 0) or 0
     duration_min = getattr(flight, "duration", 0) or 0
 
-    return price, airline_name, stops, duration_min, flight_no, dep_time
+    return {
+        "price": price,
+        "airline": airline_name,
+        "flight_no": flight_no,
+        "dep_time": dep_time,
+        "stops": stops,
+        "duration_min": duration_min,
+        "ret_airline": ret_airline,
+        "ret_flight_no": ret_flight_no,
+        "ret_dep_time": ret_dep_time,
+    }
 
 
 # ---------- History ----------
@@ -307,33 +363,45 @@ def main() -> int:
         label = route_label(route)
         print(f"Checking {label}…")
         prev = history.get(k, {}).get("last_price")
-        price, airline, stops, duration_min, flight_no, dep_time = search_cheapest(route)
+        info = search_cheapest(route)
 
-        if price is None:
+        if info is None:
             line = f'<a href="{google_flights_url(route)}">{label}</a>  no data'
         else:
+            price = info["price"]
             marker = trend_marker(price, prev)
             details_parts = []
-            if airline:
-                details_parts.append(airline[:25])
-            if flight_no:
-                details_parts.append(f"#{flight_no}")
-            if dep_time:
-                details_parts.append(f"dep {dep_time}")
-            stops_int = int(stops) if isinstance(stops, (int, float)) else 0
+            if info["airline"]:
+                details_parts.append(info["airline"][:25])
+            if info["flight_no"]:
+                details_parts.append(f"#{info['flight_no']}")
+            if info["dep_time"]:
+                details_parts.append(f"dep {info['dep_time']}")
+            stops_int = int(info["stops"]) if isinstance(info["stops"], (int, float)) else 0
             if stops_int == 0:
                 details_parts.append("direct")
             else:
                 details_parts.append(f"{stops_int} stop{'s' if stops_int > 1 else ''}")
-            dur_str = format_duration(duration_min)
+            dur_str = format_duration(info["duration_min"])
             if dur_str:
                 details_parts.append(dur_str)
+
+            # For round-trips, append return-leg info on a second sub-line
+            ret_info = ""
+            if route.get("return_date") and info.get("ret_flight_no"):
+                ret_parts = []
+                if info.get("ret_airline"):
+                    ret_parts.append(info["ret_airline"][:25])
+                ret_parts.append(f"#{info['ret_flight_no']}")
+                if info.get("ret_dep_time"):
+                    ret_parts.append(f"dep {info['ret_dep_time']}")
+                ret_info = f"\n    ↩️ return: " + ", ".join(ret_parts)
 
             details = " (" + ", ".join(details_parts) + ")" if details_parts else ""
             url = google_flights_url(route)
             line = (
                 f'<a href="{url}">{label}</a>  '
-                f"<b>{price:,.0f} {CURRENCY_LABEL}</b>{details} {marker}"
+                f"<b>{price:,.0f} {CURRENCY_LABEL}</b>{details} {marker}{ret_info}"
             )
 
             entry = history.get(k, {"history": []})
