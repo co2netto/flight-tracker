@@ -63,10 +63,10 @@
     {"origin": "BKK", "destination": "ZQN", "date": "2026-07-16"},
     {"origin": "BKK", "destination": "ZQN", "date": "2026-07-17"},
     {"origin": "BKK", "destination": "ZQN", "date": "2026-07-18"},
-    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-16"},
-    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-17"},
-    {"origin": "DMK", "destination": "ZQN", "date": "2026-07-18"},
+    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-23"},
     {"origin": "ZQN", "destination": "BKK", "date": "2026-08-01"},
-    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-02"}
+    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-02"},
+    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-08"},
+    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-09"}
   ]
 }
