@@ -314,10 +314,10 @@ def trend_marker(current: float, previous):
     if previous is None:
         return "🆕"
     if current < previous:
-        return f"🟢↓ -{previous - current:.0f}"
+        return f"🟢 -{previous - current:,.0f}"
     if current > previous:
-        return f"🔴↑ +{current - previous:.0f}"
-    return "⚪→"
+        return f"🔴 +{current - previous:,.0f}"
+    return ""  # unchanged → no marker, less visual noise
 
 
 def format_duration(minutes: int) -> str:
@@ -383,13 +383,23 @@ def main() -> int:
         else:
             price = info["price"]
             marker = trend_marker(price, prev)
+
+            # Line 1: route + price + trend
+            url = google_flights_url(route)
+            marker_suffix = f"  {marker}" if marker else ""
+            line1 = (
+                f'<a href="{url}">{label}</a>  '
+                f"<b>{price:,.0f} {CURRENCY_LABEL}</b>{marker_suffix}"
+            )
+
+            # Line 2: details (airline, flight #, dep time, stops, duration)
             details_parts = []
             if info["airline"]:
                 details_parts.append(info["airline"][:25])
             if info["flight_no"]:
                 details_parts.append(f"#{info['flight_no']}")
             if info["dep_time"]:
-                details_parts.append(f"dep {info['dep_time']}")
+                details_parts.append(info["dep_time"])
             stops_int = int(info["stops"]) if isinstance(info["stops"], (int, float)) else 0
             if stops_int == 0:
                 details_parts.append("direct")
@@ -399,23 +409,20 @@ def main() -> int:
             if dur_str:
                 details_parts.append(dur_str)
 
-            # For round-trips, append return-leg info on a second sub-line
-            ret_info = ""
+            details_line = "    " + " · ".join(details_parts) if details_parts else ""
+
+            # Round-trip: add a third line for return-leg info
+            ret_line = ""
             if route.get("return_date") and info.get("ret_flight_no"):
                 ret_parts = []
                 if info.get("ret_airline"):
                     ret_parts.append(info["ret_airline"][:25])
                 ret_parts.append(f"#{info['ret_flight_no']}")
                 if info.get("ret_dep_time"):
-                    ret_parts.append(f"dep {info['ret_dep_time']}")
-                ret_info = f"\n    ↩️ return: " + ", ".join(ret_parts)
+                    ret_parts.append(info["ret_dep_time"])
+                ret_line = "\n    ↩️ " + " · ".join(ret_parts)
 
-            details = " (" + ", ".join(details_parts) + ")" if details_parts else ""
-            url = google_flights_url(route)
-            line = (
-                f'<a href="{url}">{label}</a>  '
-                f"<b>{price:,.0f} {CURRENCY_LABEL}</b>{details} {marker}{ret_info}"
-            )
+            line = f"{line1}\n{details_line}{ret_line}"
 
             entry_hist = history.get(k, {"history": []})
             entry_hist["last_price"] = price
