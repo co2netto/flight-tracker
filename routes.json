@@ -14,20 +14,48 @@
   },
   "routes": [
     {
-      "_section": "Queenstown trip (Jul 16 - Aug 2)"
+      "_section": "Queenstown trip (Jul 23 - Aug 9)"
     },
     {
       "origin": "BKK",
       "destination": "ZQN",
-      "date": "2026-07-16",
-      "return_date": "2026-08-01",
+      "date": "2026-07-23",
+      "return_date": "2026-08-09",
       "label_suffix": "BKK-ZQN Round"
     },
-    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-16"},
     {"origin": "BKK", "destination": "ZQN", "date": "2026-07-23"},
+    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-08"},
+    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-09"},
+
+    {
+      "_section": "Queenstown trip old (Jul 16 - Aug 2)"
+    },
+    {"origin": "BKK", "destination": "ZQN", "date": "2026-07-16"},
     {"origin": "ZQN", "destination": "BKK", "date": "2026-08-01"},
     {"origin": "ZQN", "destination": "BKK", "date": "2026-08-02"},
-    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-08"},
-    {"origin": "ZQN", "destination": "BKK", "date": "2026-08-09"}
+
+    {
+      "_section": "Japan"
+    },
+    {
+      "origin": "BKK",
+      "destination": "CTS",
+      "date": "2026-10-09",
+      "return_date": "2026-10-18",
+      "label_suffix": "BKK-CTS Round"
+    },
+    {
+      "origin": "DMK",
+      "destination": "CTS",
+      "date": "2026-10-09",
+      "return_date": "2026-10-18",
+      "label_suffix": "BKK-CTS Round"
+    },
+    {"origin": "BKK", "destination": "CTS", "date": "2026-10-09"},
+    {"origin": "DMK", "destination": "CTS", "date": "2026-10-09"},
+    {"origin": "BKK", "destination": "CTS", "date": "2026-10-10"},
+    {"origin": "DMK", "destination": "CTS", "date": "2026-10-10"},
+    {"origin": "CTS", "destination": "BKK", "date": "2026-10-18"},
+    {"origin": "CTS", "destination": "DMK", "date": "2026-10-18"},
   ]
 }
