@@ -37,6 +37,23 @@ from fli.models import (
     TripType,
 )
 from fli.search import SearchFlights
+import fli.search.client as _fli_client_module  # for resetting the shared HTTP client
+
+
+def reset_fli_client():
+    """Force fli to rebuild its shared HTTP client on the next call.
+
+    fli caches a process-wide singleton HTTP client in
+    ``fli.search.client.client``. Google appears to flag that client as
+    bot-suspicious after a few calls, returning empty responses for
+    subsequent queries. Setting the singleton to ``None`` forces a fresh
+    Client (new TLS fingerprint, cookies, rate-limit bucket) on the
+    next ``get_client()`` call.
+    """
+    try:
+        _fli_client_module.client = None
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ---------- Configuration ----------
@@ -164,6 +181,11 @@ def search_cheapest(route: dict):
             stops=MaxStops.ANY,
             sort_by=SortBy.CHEAPEST,
         )
+
+        # Reset fli's module-level HTTP client singleton before each search.
+        # Sharing the same client across many calls causes Google to flag it
+        # as bot-like and return empty results. Fresh client per route fixes this.
+        reset_fli_client()
 
         search = SearchFlights()
         results = search.search(filters)
