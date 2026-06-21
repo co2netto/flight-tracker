@@ -81,6 +81,10 @@ ROUTES = [r for r in ROUTES_AND_SECTIONS if "_section" not in r]
 ADULTS = 1
 CURRENCY_LABEL = "THB"  # fli typically returns USD; we display whatever the API gives
 
+# Delay between sections (helps avoid Google rate-limiting when many routes are checked).
+# 0 disables. Reasonable values: 5–15 seconds.
+SECTION_DELAY_SECONDS = 8
+
 HISTORY_FILE = Path("price_history_fli.json")
 
 
@@ -166,13 +170,27 @@ def search_cheapest(route: dict):
         )
 
         search = SearchFlights()
-        results = search.search(filters)
+
+        # Retry on empty result (often indicates transient rate-limiting).
+        # Exponential backoff: 2s, 5s, 10s between attempts.
+        results = None
+        delays = [2, 5, 10]
+        for attempt in range(len(delays) + 1):
+            results = search.search(filters)
+            if results:
+                if attempt > 0:
+                    print(f"  ✓ recovered after {attempt} retry(s)")
+                break
+            if attempt < len(delays):
+                wait = delays[attempt]
+                print(f"  ⏳ empty result, retrying in {wait}s (attempt {attempt + 1}/{len(delays)})")
+                time.sleep(wait)
     except Exception as e:
         print(f"  ⚠️  fli exception: {type(e).__name__}: {e}", file=sys.stderr)
         return None
 
     if not results:
-        print(f"  ⚠️  fli returned empty results (no exception)", file=sys.stderr)
+        print(f"  ⚠️  fli returned empty results after retries", file=sys.stderr)
         return None
 
     print(f"  → fli returned {len(results)} raw result(s)")
@@ -369,8 +387,15 @@ def main() -> int:
     # Walk routes.json entries in order. Emit a header for each {_section: "..."} marker,
     # then the result line for each real route. This makes the Telegram output mirror
     # the structure of routes.json so you can reorder/group there.
+    seen_section = False
     for entry in ROUTES_AND_SECTIONS:
         if "_section" in entry:
+            # Sleep between sections (but not before the very first one) to reduce
+            # the burst of API requests and help avoid rate limiting.
+            if seen_section and SECTION_DELAY_SECONDS > 0:
+                print(f"  💤 inter-section pause: {SECTION_DELAY_SECONDS}s")
+                time.sleep(SECTION_DELAY_SECONDS)
+            seen_section = True
             lines.append("")
             lines.append(f"<b>{entry['_section']}</b>")
             continue
