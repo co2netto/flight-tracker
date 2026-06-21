@@ -168,11 +168,14 @@ def search_cheapest(route: dict):
         search = SearchFlights()
         results = search.search(filters)
     except Exception as e:
-        print(f"  fetch error: {e}", file=sys.stderr)
+        print(f"  ⚠️  fli exception: {type(e).__name__}: {e}", file=sys.stderr)
         return None
 
     if not results:
+        print(f"  ⚠️  fli returned empty results (no exception)", file=sys.stderr)
         return None
+
+    print(f"  → fli returned {len(results)} raw result(s)")
 
     # Normalize: round-trip returns list of (outbound, return) tuples;
     # one-way returns list of Flight objects.
@@ -220,6 +223,7 @@ def search_cheapest(route: dict):
     candidates = [c for c in candidates if c[0] and c[0] > 0]
 
     if not candidates:
+        print(f"  ⚠️  All candidates filtered out (had {len(results)} raw, 0 after filters)", file=sys.stderr)
         return None
 
     candidates.sort(key=lambda x: x[0])
