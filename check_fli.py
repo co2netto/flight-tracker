@@ -81,20 +81,6 @@ ROUTES = [r for r in ROUTES_AND_SECTIONS if "_section" not in r]
 ADULTS = 1
 CURRENCY_LABEL = "THB"  # fli typically returns USD; we display whatever the API gives
 
-# --- Rate-limit tuning ---
-# Delay between consecutive route queries (helps avoid Google throttling).
-# 0 disables. Reasonable values: 2–6 seconds.
-INTER_ROUTE_DELAY_SECONDS = 3
-
-# Delay between sections (additional pause on top of inter-route delay).
-# 0 disables. Reasonable values: 0–10 seconds.
-SECTION_DELAY_SECONDS = 5
-
-# Retry schedule when fli returns empty results. Each value is seconds to wait
-# before the next attempt. More attempts / longer waits = better recovery rate
-# at the cost of total runtime.
-RETRY_DELAYS = [3, 7, 15]
-
 HISTORY_FILE = Path("price_history_fli.json")
 
 
@@ -180,26 +166,13 @@ def search_cheapest(route: dict):
         )
 
         search = SearchFlights()
-
-        # Retry on empty result (often indicates transient rate-limiting).
-        # Backoff schedule configured via RETRY_DELAYS at the top of the file.
-        results = None
-        for attempt in range(len(RETRY_DELAYS) + 1):
-            results = search.search(filters)
-            if results:
-                if attempt > 0:
-                    print(f"  ✓ recovered after {attempt} retry(s)")
-                break
-            if attempt < len(RETRY_DELAYS):
-                wait = RETRY_DELAYS[attempt]
-                print(f"  ⏳ empty result, retrying in {wait}s (attempt {attempt + 1}/{len(RETRY_DELAYS)})")
-                time.sleep(wait)
+        results = search.search(filters)
     except Exception as e:
         print(f"  ⚠️  fli exception: {type(e).__name__}: {e}", file=sys.stderr)
         return None
 
     if not results:
-        print(f"  ⚠️  fli returned empty results after retries", file=sys.stderr)
+        print(f"  ⚠️  fli returned empty results", file=sys.stderr)
         return None
 
     print(f"  → fli returned {len(results)} raw result(s)")
@@ -396,15 +369,8 @@ def main() -> int:
     # Walk routes.json entries in order. Emit a header for each {_section: "..."} marker,
     # then the result line for each real route. This makes the Telegram output mirror
     # the structure of routes.json so you can reorder/group there.
-    seen_section = False
     for entry in ROUTES_AND_SECTIONS:
         if "_section" in entry:
-            # Sleep between sections (but not before the very first one) to reduce
-            # the burst of API requests and help avoid rate limiting.
-            if seen_section and SECTION_DELAY_SECONDS > 0:
-                print(f"  💤 inter-section pause: {SECTION_DELAY_SECONDS}s")
-                time.sleep(SECTION_DELAY_SECONDS)
-            seen_section = True
             lines.append("")
             lines.append(f"<b>{entry['_section']}</b>")
             continue
@@ -472,8 +438,7 @@ def main() -> int:
             history[k] = entry_hist
 
         lines.append(line)
-        if INTER_ROUTE_DELAY_SECONDS > 0:
-            time.sleep(INTER_ROUTE_DELAY_SECONDS)
+        time.sleep(1)
 
     lines.append("")
 
