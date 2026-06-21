@@ -26,6 +26,15 @@
     {"origin": "BKK", "destination": "ZQN", "date": "2026-07-23"},
     {"origin": "ZQN", "destination": "BKK", "date": "2026-08-08"},
     {"origin": "ZQN", "destination": "BKK", "date": "2026-08-09"},
+    
+    {
+      "_section": "Queenstown Return"
+    },
+    {"origin": "ZQN", "destination": "AKL", "date": "2026-08-08"},
+    {"origin": "AKL", "destination": "BKK", "date": "2026-08-09"},
+    {"origin": "ZQN", "destination": "CHC", "date": "2026-08-08"},
+    {"origin": "CHC", "destination": "BKK", "date": "2026-08-09"},
+    
     {
       "_section": "Queenstown trip old (Jul 16 - Aug 2)"
     },
