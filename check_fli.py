@@ -81,9 +81,19 @@ ROUTES = [r for r in ROUTES_AND_SECTIONS if "_section" not in r]
 ADULTS = 1
 CURRENCY_LABEL = "THB"  # fli typically returns USD; we display whatever the API gives
 
-# Delay between sections (helps avoid Google rate-limiting when many routes are checked).
-# 0 disables. Reasonable values: 5–15 seconds.
-SECTION_DELAY_SECONDS = 8
+# --- Rate-limit tuning ---
+# Delay between consecutive route queries (helps avoid Google throttling).
+# 0 disables. Reasonable values: 2–6 seconds.
+INTER_ROUTE_DELAY_SECONDS = 3
+
+# Delay between sections (additional pause on top of inter-route delay).
+# 0 disables. Reasonable values: 0–10 seconds.
+SECTION_DELAY_SECONDS = 5
+
+# Retry schedule when fli returns empty results. Each value is seconds to wait
+# before the next attempt. More attempts / longer waits = better recovery rate
+# at the cost of total runtime.
+RETRY_DELAYS = [3, 7, 15]
 
 HISTORY_FILE = Path("price_history_fli.json")
 
@@ -172,18 +182,17 @@ def search_cheapest(route: dict):
         search = SearchFlights()
 
         # Retry on empty result (often indicates transient rate-limiting).
-        # Exponential backoff: 2s, 5s, 10s between attempts.
+        # Backoff schedule configured via RETRY_DELAYS at the top of the file.
         results = None
-        delays = [2, 5, 10]
-        for attempt in range(len(delays) + 1):
+        for attempt in range(len(RETRY_DELAYS) + 1):
             results = search.search(filters)
             if results:
                 if attempt > 0:
                     print(f"  ✓ recovered after {attempt} retry(s)")
                 break
-            if attempt < len(delays):
-                wait = delays[attempt]
-                print(f"  ⏳ empty result, retrying in {wait}s (attempt {attempt + 1}/{len(delays)})")
+            if attempt < len(RETRY_DELAYS):
+                wait = RETRY_DELAYS[attempt]
+                print(f"  ⏳ empty result, retrying in {wait}s (attempt {attempt + 1}/{len(RETRY_DELAYS)})")
                 time.sleep(wait)
     except Exception as e:
         print(f"  ⚠️  fli exception: {type(e).__name__}: {e}", file=sys.stderr)
@@ -463,7 +472,8 @@ def main() -> int:
             history[k] = entry_hist
 
         lines.append(line)
-        time.sleep(1)
+        if INTER_ROUTE_DELAY_SECONDS > 0:
+            time.sleep(INTER_ROUTE_DELAY_SECONDS)
 
     lines.append("")
 
