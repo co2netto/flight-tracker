@@ -37,23 +37,7 @@ from fli.models import (
     TripType,
 )
 from fli.search import SearchFlights
-import fli.search.client as _fli_client_module  # for resetting the shared HTTP client
-
-
-def reset_fli_client():
-    """Force fli to rebuild its shared HTTP client on the next call.
-
-    fli caches a process-wide singleton HTTP client in
-    ``fli.search.client.client``. Google appears to flag that client as
-    bot-suspicious after a few calls, returning empty responses for
-    subsequent queries. Setting the singleton to ``None`` forces a fresh
-    Client (new TLS fingerprint, cookies, rate-limit bucket) on the
-    next ``get_client()`` call.
-    """
-    try:
-        _fli_client_module.client = None
-    except Exception:  # noqa: BLE001
-        pass
+import fli.search.client as _fli_client_module
 
 
 # ---------- Configuration ----------
@@ -182,19 +166,28 @@ def search_cheapest(route: dict):
             sort_by=SortBy.CHEAPEST,
         )
 
-        # Reset fli's module-level HTTP client singleton before each search.
-        # Sharing the same client across many calls causes Google to flag it
-        # as bot-like and return empty results. Fresh client per route fixes this.
-        reset_fli_client()
-
         search = SearchFlights()
-        results = search.search(filters)
+
+        # Retry on empty result. Backoff schedule from Run 2 (best results):
+        # 2s, 5s, 10s between attempts. Up to 3 retries.
+        results = None
+        delays = [2, 5, 10]
+        for attempt in range(len(delays) + 1):
+            results = search.search(filters)
+            if results:
+                if attempt > 0:
+                    print(f"  ✓ recovered after {attempt} retry(s)")
+                break
+            if attempt < len(delays):
+                wait = delays[attempt]
+                print(f"  ⏳ empty result, retrying in {wait}s (attempt {attempt + 1}/{len(delays)})")
+                time.sleep(wait)
     except Exception as e:
         print(f"  ⚠️  fli exception: {type(e).__name__}: {e}", file=sys.stderr)
         return None
 
     if not results:
-        print(f"  ⚠️  fli returned empty results", file=sys.stderr)
+        print(f"  ⚠️  fli returned empty results after retries", file=sys.stderr)
         return None
 
     print(f"  → fli returned {len(results)} raw result(s)")
@@ -395,6 +388,14 @@ def main() -> int:
         if "_section" in entry:
             lines.append("")
             lines.append(f"<b>{entry['_section']}</b>")
+            # Reset fli's shared HTTP client at each section boundary.
+            # Theory: a fresh client per section avoids Google flagging the
+            # session after several consecutive calls.
+            try:
+                _fli_client_module.client = None
+                print(f"  🔄 client reset at section: {entry['_section']}")
+            except Exception:
+                pass
             continue
 
         route = entry
@@ -460,7 +461,7 @@ def main() -> int:
             history[k] = entry_hist
 
         lines.append(line)
-        time.sleep(1)
+        time.sleep(5)
 
     lines.append("")
 
